@@ -4,3 +4,4 @@ curl 'https://raw.githubusercontent.com/xiangpengm/token-core-ts/main/patches/sc
 npm i scrypt-ts@1.3.31 scryptlib@2.1.41
 patch-package
 cd node_modules/scryptlib &&  npm run postinstall
+rm -rf patches/
