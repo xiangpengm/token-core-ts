@@ -1,0 +1,82 @@
+diff --git a/node_modules/scrypt-ts/dist/smart-contract/builtins/functions.js b/node_modules/scrypt-ts/dist/smart-contract/builtins/functions.js
+index c3b9cdb..4cb09c9 100644
+--- a/node_modules/scrypt-ts/dist/smart-contract/builtins/functions.js
++++ b/node_modules/scrypt-ts/dist/smart-contract/builtins/functions.js
+@@ -1472,7 +1472,7 @@ class Tx {
+     static checkPreimageOpt_(txPreimage) { throw new Error('unimplemented'); }
+     static checkPreimageAdvancedOCS(txPreimage, privKey, pubKey, inverseK, r, rBigEndian, sigHashType) { throw new Error('unimplemented'); }
+     static checkPreimageOCS(txPreimage) { throw new Error('unimplemented'); }
+-    static checkPreimageSigHashTypeOCS(txPreimage, sigHashType) { throw new Error('unimplemented'); }
++    static checkPreimageSigHashTypeOCS(txPreimage, sigHashType) { return true }
+     // optimal pushtx
+     static checkPreimageOptOCS(txPreimage) { throw new Error('unimplemented'); }
+     // customize sigHashType
+diff --git a/node_modules/scrypt-ts/dist/smart-contract/contract.d.ts b/node_modules/scrypt-ts/dist/smart-contract/contract.d.ts
+index 6faa2fa..edacaa2 100644
+--- a/node_modules/scrypt-ts/dist/smart-contract/contract.d.ts
++++ b/node_modules/scrypt-ts/dist/smart-contract/contract.d.ts
+@@ -116,7 +116,7 @@ export declare class SmartContract {
+     /** @ignore */
+     private static DelegateClazz;
+     /** @ignore */
+-    private delegateInstance;
++    public delegateInstance;
+     /** @ignore */
+     private static compileImpl;
+     /**
+diff --git a/node_modules/scrypt-ts/dist/smart-contract/contract.js b/node_modules/scrypt-ts/dist/smart-contract/contract.js
+index c9ef2a6..30c407b 100644
+--- a/node_modules/scrypt-ts/dist/smart-contract/contract.js
++++ b/node_modules/scrypt-ts/dist/smart-contract/contract.js
+@@ -772,6 +772,51 @@ class SmartContract {
+         let txPreimage;
+         let prevouts;
+         const accessPathArgCallbacks = new Map();
++        const isCheckContract = function(name) {
++            const prefixList = ['TokenTransferCheck', 'TokenUnlockContractCheck', 'NftUnlockContractCheck']
++            for (let index = 0; index < prefixList.length; index++) {
++                const element = prefixList[index];
++                if (name.startsWith(element)) {
++                    return true
++                }
++            }
++            return false;
++        }
++        abi.params.forEach((param, idx) => {
++            // replace `txPreimage` for mvc 
++            if (param.name === "txPreimage" && param.type === "SigHashPreimage") {
++                const sighash = this.sigTypeOfMethod(methodName);
++                const contractName = this.getDelegateClazz().artifact.contract
++                if (isCheckContract(contractName)) {
++                    args[idx] = (0, types_1.SigHashPreimage)(this.to.tx.getPreimage(this.to.inputIndex, sighash, false, 0));
++                } else {
++                    args[idx] = (0, types_1.SigHashPreimage)(this.to.tx.getPreimage(this.to.inputIndex, sighash));                                        
++                }
++            }
++            // replace `changeSatoshi` for mvc 
++            if (param.name === "changeSatoshis" && param.type === "int") {
++                args[idx] = this.changeAmount
++            }
++            // replace `changeAddress` for mvc 
++            if (param.name === "changeAddress" && param.type === "Ripemd160") {
++                args[idx] = this.changeAddress
++            }
++            // replace `prevouts` for mvc
++            if (param.name === "prevouts" && param.type === "bytes") {
++                args[idx] = this.prevouts;
++            }
++            // auto add otherOutputArray change for mvc
++            if (param.name === 'otherOutputArray' && param.type === 'bytes') {
++                if (this.changeAmount > 0n || this.changeAmount > 0) {
++                    const changeScript = functions_1.Utils.buildPublicKeyHashScript(this.changeAddress);
++                    const output = functions_1.Utils.buildOutput(changeScript, this.changeAmount);
++                    const outputLen = output.length / 2
++                    const buf = Buffer.alloc(4, 0)
++                    buf.writeUInt32LE(outputLen)
++                    args[idx] = args[idx] + buf.toString('hex') + output
++                }
++            }
++        })
+         autoFillParams.forEach((param, idx) => {
+             // auto fill `__scrypt_ts_txPreimage`
+             if (param.name === "__scrypt_ts_txPreimage" && param.type === "SigHashPreimage") {

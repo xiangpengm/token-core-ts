@@ -1,0 +1,161 @@
+diff --git a/node_modules/scryptlib/compiler/scryptc/mac/scryptc b/node_modules/scryptlib/compiler/scryptc/mac/scryptc
+new file mode 100755
+index 0000000..b1ad0ea
+Binary files /dev/null and b/node_modules/scryptlib/compiler/scryptc/mac/scryptc differ
+diff --git a/node_modules/scryptlib/dist/compilerWrapper.js b/node_modules/scryptlib/dist/compilerWrapper.js
+index 8afc4ef..06e195e 100644
+--- a/node_modules/scryptlib/dist/compilerWrapper.js
++++ b/node_modules/scryptlib/dist/compilerWrapper.js
+@@ -219,17 +219,18 @@ function settings2cmd(sourcePath, settings) {
+     //dir that store ast,asm file
+     var outputDir = toOutputDir(artifactDir, sourcePath);
+     var cmdPrefix = settings.cmdPrefix || (0, internal_1.findCompiler)();
+-    var outOption = "-o \"".concat(outputDir, "\"");
++    var outOption = " -o \"".concat(outputDir, "\"");
++    var hexArg = process.env.OPTIMIZE ? '--hex -O ' : '--hex ';
+     if (settings.stdout) {
+         outOption = '--stdout';
+-        return "\"".concat(cmdPrefix, "\" compile ").concat(settings.asm || settings.artifact ? '--asm' : '', " ").concat(settings.hex ? '--hex' : '', " ").concat(settings.ast || settings.artifact ? '--ast' : '', " ").concat(settings.debug == true ? '--debug' : '', " -r ").concat(outOption, " ").concat(settings.cmdArgs ? settings.cmdArgs : '');
++        return "\"".concat(cmdPrefix, "\" compile ").concat(settings.asm || settings.artifact ? '--asm' : '', " ").concat(settings.hex ? hexArg : '', " ").concat(settings.ast || settings.artifact ? '--ast' : '', " ").concat(settings.debug == true ? '--debug' : '', " -r ").concat(outOption, " ").concat(settings.cmdArgs ? settings.cmdArgs : '');
+     }
+     else {
+         if (!(0, fs_1.existsSync)(outputDir)) {
+             (0, fs_1.mkdirSync)(outputDir);
+         }
+     }
+-    return "\"".concat(cmdPrefix, "\" compile ").concat(settings.hex ? '--hex' : '', " ").concat(settings.ast || settings.artifact ? '--ast' : '', " ").concat(settings.debug == true ? '--debug' : '', " ").concat(settings.sourceMap == true ? '--source-map' : '', " -r ").concat(outOption, " ").concat(settings.cmdArgs ? settings.cmdArgs : '');
++    return "\"".concat(cmdPrefix, "\" compile ").concat(settings.hex ? hexArg : '', " ").concat(settings.ast || settings.artifact ? '--ast' : '', " ").concat(settings.debug == true ? '--debug' : '', " ").concat(settings.sourceMap == true ? '--source-map' : '', " -r ").concat(outOption, " ").concat(settings.cmdArgs ? settings.cmdArgs : '');
+ }
+ exports.settings2cmd = settings2cmd;
+ function compile(source, settings) {
+diff --git a/node_modules/scryptlib/dist/contract.d.ts b/node_modules/scryptlib/dist/contract.d.ts
+index 0a138e0..f51b9ec 100644
+--- a/node_modules/scryptlib/dist/contract.d.ts
++++ b/node_modules/scryptlib/dist/contract.d.ts
+@@ -99,6 +99,7 @@ export declare class AbstractContract {
+     addFunctionCall(f: FunctionCall): void;
+     get resolver(): TypeResolver;
+     replaceAsmVars(asmVarValues: AsmVarValues): void;
++    replaceLocking(locking: any): void;
+     get asmArgs(): AsmVarValues;
+     /**
+    * @param states an object. Each key of the object is the name of a state property, and each value is the value of the state property.
+diff --git a/node_modules/scryptlib/dist/contract.js b/node_modules/scryptlib/dist/contract.js
+index a9782ad..2c1a6bf 100644
+--- a/node_modules/scryptlib/dist/contract.js
++++ b/node_modules/scryptlib/dist/contract.js
+@@ -183,6 +183,9 @@ var AbstractContract = /** @class */ (function () {
+         var lockingScript = (0, internal_1.buildContractCode)(this.hexTemplateArgs, this.hexTemplateInlineASM, hexTemplate);
+         this.scriptedConstructor.lockingScript = lockingScript;
+     };
++    AbstractContract.prototype.replaceLocking = function (lockingScript) {
++        this.scriptedConstructor.lockingScript = lockingScript;
++    };
+     Object.defineProperty(AbstractContract.prototype, "asmArgs", {
+         // replace assembly variables with assembly values
+         get: function () {
+diff --git a/node_modules/scryptlib/patches/bsv/index.d.ts b/node_modules/scryptlib/patches/bsv/index.d.ts
+index 8c17132..3350998 100644
+--- a/node_modules/scryptlib/patches/bsv/index.d.ts
++++ b/node_modules/scryptlib/patches/bsv/index.d.ts
+@@ -734,6 +734,7 @@ declare module 'bsv' {
+                 pubkey: PublicKey,
+                 endian?: 'little'
+             ): boolean;
++            function toLowS(s: BN): BN
+         }
+ 
+         namespace Hash {
+@@ -795,6 +796,7 @@ declare module 'bsv' {
+             static isTxDER(buf: Buffer): boolean;
+             hasLowS(): boolean;
+             toTxFormat(): Buffer;
++            set(obj: { r?: BN; s?: BN; i?: number; compressed?: boolean; nhashtype?: number }): this
+         }
+     }
+ 
+@@ -906,6 +908,7 @@ declare module 'bsv' {
+ 
+     export class Transaction {
+         static DUMMY_PRIVATEKEY: PrivateKey;
++        version: number;
+         inputs: Transaction.Input[];
+         outputs: Transaction.Output[];
+         readonly id: string;
+@@ -957,7 +960,7 @@ declare module 'bsv' {
+         isRBF(): boolean;
+ 
+         inspect(): string;
+-        serialize(opts?: object): string;
++        serialize(opts?: object | boolean): string;
+         uncheckedSerialize(): string;
+ 
+         toObject(): any;
+diff --git a/node_modules/scryptlib/patches/bsv/lib/transaction/transaction.js b/node_modules/scryptlib/patches/bsv/lib/transaction/transaction.js
+index e35c7d5..669f2b4 100644
+--- a/node_modules/scryptlib/patches/bsv/lib/transaction/transaction.js
++++ b/node_modules/scryptlib/patches/bsv/lib/transaction/transaction.js
+@@ -60,7 +60,7 @@ function Transaction (serialized) {
+   }
+ }
+ 
+-var CURRENT_VERSION = 1
++var CURRENT_VERSION = 10
+ var DEFAULT_NLOCKTIME = 0
+ var MAX_BLOCK_SIZE = 1000000
+ 
+@@ -133,6 +133,9 @@ Object.defineProperty(Transaction.prototype, 'outputAmount', ioProperty)
+  * @return {Buffer}
+  */
+ Transaction.prototype._getHash = function () {
++  if (this.version >= 10) {
++    return Hash.sha256sha256(this.newTxHeader().toBuffer())
++  }
+   return Hash.sha256sha256(this.toBuffer())
+ }
+ 
+@@ -288,6 +291,34 @@ Transaction.prototype.toBufferWriter = function (writer) {
+   return writer
+ }
+ 
++Transaction.prototype.newTxHeader = function () {
++  var writer = new BufferWriter()
++  writer.writeUInt32LE(this.version)
++  writer.writeUInt32LE(this.nLockTime)
++  writer.writeInt32LE(this.inputs.length)
++  writer.writeInt32LE(this.outputs.length)
++
++  const inputWriter = new BufferWriter()
++  const inputWriter2 = new BufferWriter()
++  for (const input of this.inputs) {
++    inputWriter.writeReverse(input.prevTxId)
++    inputWriter.writeUInt32LE(input.outputIndex)
++    inputWriter.writeUInt32LE(input.sequenceNumber)
++
++    inputWriter2.write(Hash.sha256(input.script.toBuffer()))
++  }
++  writer.write(Hash.sha256(inputWriter.toBuffer()))
++  writer.write(Hash.sha256(inputWriter2.toBuffer()))
++
++  const outputWriter = new BufferWriter()
++  for (const output of this.outputs) {
++    outputWriter.writeUInt64LEBN(output.satoshisBN)
++    outputWriter.write(Hash.sha256(output.script.toBuffer()))
++  }
++  writer.write(Hash.sha256(outputWriter.toBuffer()))
++  return writer
++}
++
+ Transaction.prototype.fromBuffer = function (buffer) {
+   var reader = new BufferReader(buffer)
+   return this.fromBufferReader(reader)
+@@ -1232,6 +1263,9 @@ Transaction.prototype.verify = function (notVerifyInput) {
+ 
+       if (!notVerifyInput) {
+         var res = this.inputs[i].verify(this, i)
++        if (this.inputs[i].script.chunks.length == 0) {
++          continue
++        }
+         if (!res.success) {
+           return 'transaction input ' + i + ' VerifyError: ' + res.error
+         }
